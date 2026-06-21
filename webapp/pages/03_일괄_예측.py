@@ -115,10 +115,14 @@ if uploaded is not None:
     )
     st.caption("📌 예상손실액은 1개월 근사치 · 약정 잔여기간(LTV) 반영 시 더 클 수 있음")
 
-    budget_n = st.slider(
-        "예산이 허락하는 리텐션 캠페인 대상 인원 (상위 N명)",
-        min_value=5, max_value=min(200, len(result)), value=min(20, len(result)), step=5,
-    )
+    if len(result) < 5:
+        budget_n = len(result)
+        st.caption(f"업로드된 고객이 {len(result)}명뿐이라 전체를 대상으로 표시합니다.")
+    else:
+        budget_n = st.slider(
+            "예산이 허락하는 리텐션 캠페인 대상 인원 (상위 N명)",
+            min_value=5, max_value=min(200, len(result)), value=min(20, len(result)), step=5,
+        )
 
     rank_basis = st.radio(
         "우선순위 기준", ["예상손실액 (권장)", "이탈확률만"], horizontal=True,

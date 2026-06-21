@@ -304,4 +304,23 @@ webapp 코드 하나의 문제가 아니라 프로젝트 전체에 적용될 작
 
 ---
 
+# 버그 수정 이력 (의사결정 아님, 코드 결함 수정 기록)
+
+## [수정] 03번 페이지 — 업로드 행 5건 미만일 때 슬라이더 크래시
+
+**증상**: `streamlit.errors.StreamlitAPIException: Slider 'min_value' must be
+less than the 'max_value'.` — 샘플 CSV(1행)를 그대로 업로드하면 발생.
+
+**원인**: `budget_n` 슬라이더가 `min_value=5`로 고정인데
+`max_value=min(200, len(result))`라서, 업로드 행이 5건 미만이면
+`min_value(5) > max_value(행수)`가 되어 Streamlit이 예외를 던짐.
+
+**수정**: 결과 행이 5건 미만이면 슬라이더를 표시하지 않고
+`budget_n = len(result)`(전체)로 대체. 5건 이상일 때만 기존 슬라이더 사용.
+n=1,2,4,5,6,20,200,300 전 구간 시뮬레이션으로 안전성 확인.
+
+**적용 대상**: `webapp/pages/03_일괄_예측.py` (완료)
+
+---
+
 (다음 결정사항은 이 아래에 같은 형식으로 추가)
