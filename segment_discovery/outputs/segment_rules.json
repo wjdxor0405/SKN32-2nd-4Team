@@ -27,9 +27,9 @@
       ],
       "attribute_auc": 0.7575184270788606,
       "p_value": 0.0,
-      "ci_low": 0.722302897555709,
-      "ci_high": 0.7810559864850172,
-      "n_bootstrap_used": 40,
+      "ci_low": 0.7223275535652902,
+      "ci_high": 0.7848675573459133,
+      "n_bootstrap_used": 100,
       "n_permutations_used": 60
     },
     {

@@ -12,15 +12,135 @@
 
 ## 목차
 
-- [기술 스택](#기술-스택)
-- [01. 인공지능 데이터 전처리 결과서](#01-인공지능-데이터-전처리-결과서)
-- [02. 인공지능 학습 결과서](#02-인공지능-학습-결과서)
-- [03. 모델 설계도](#03-모델-설계도)
+- [팀 소개 및 역할 분담](#팀-소개-및-역할-분담)
 - [폴더 구조](#폴더-구조)
 - [핵심 설계 원칙](#핵심-설계-원칙)
 - [실행 순서](#실행-순서)
 - [테스트 / 설정 / 자동화](#테스트--설정--자동화)
-- [팀 소개 및 역할 분담](#팀-소개-및-역할-분담)
+- [기술 스택](#기술-스택)
+- [01. 인공지능 데이터 전처리 결과서](#01-인공지능-데이터-전처리-결과서)
+- [02. 인공지능 학습 결과서](#02-인공지능-학습-결과서)
+- [03. 모델 설계도](#03-모델-설계도)
+
+---
+
+## 팀 소개 및 역할 분담
+
+**Customerang**
+
+| 구성원 | 역할 |
+|---|---|
+| 오한빈 (팀장) | 핵심 아이디어 제안(생애주기 세그멘테이션의 데이터 기반 자동화 루프화), 분석A·분석B·서브트랙Q·예측모델 전체 기획·설계·파이프라인 구축 및 검증 구현, 전처리 구현, 프로젝트 전 과정 참여 |
+| 서유현, 소성민, 임정택 | 팀장이 설계한 분석A·분석B·서브트랙Q·예측모델 전 영역에 걸쳐 공동으로 실데이터 검증 수행, Streamlit 대시보드 구현 |
+
+---
+
+## 폴더 구조
+
+```
+Customerang/  (저장소명: SKN32-2nd-4Team)
+├── config.py             # 전체 프로젝트 설정 단일 출처 (랜덤시드, 반복횟수, 하이퍼파라미터, 경로)
+├── .github/workflows/
+│   └── tests.yml          # push/PR마다 자동으로 tests/ 실행 (CI)
+├── docs/diagrams/         # 03. 모델 설계도 다이어그램 원본 (PNG)
+├── tests/                 # pytest — 회귀 테스트
+├── logs/                  # train.py 실행 기록 (성공/실패 모두, .gitignore 대상)
+│
+├── segment_discovery/   # 분석A·분석B·서브트랙Q (재학습 묶음 — train.py와 같은 주기로 가끔 실행)
+│   ├── src/
+│   │   ├── preprocessing.py    # 탐색용 전처리 (원본 로드~Train/Test 분할)
+│   │   ├── analysis_a.py       # ①-가 가지치기회귀나무 ①-나 RF보조검증 ②AUC+순열검정 ③부트스트랩CI
+│   │   ├── analysis_b.py       # Ⓐ패턴탐지 Ⓑ적절성검증(AUC+순열검정) Ⓒ부트스트랩CI + extract_risk_attribute_values
+│   │   ├── subtrack_q.py       # risk_count(메인) + K-means(보조탐색)
+│   │   └── gap_calibration.py  # Sequential Early Stopping 공통 루프 + structural_gap 적응형 보정
+│   ├── outputs/
+│   │   └── segment_rules.json  # ← churn_prediction이 읽는 유일한 인터페이스
+│   └── app.py                  # 진입점
+│
+├── churn_prediction/     # 예측모델
+│   ├── src/
+│   │   ├── feature_engineering.py  # segment_rules.json 적용, FeatureTransformer(저장/로드 가능)
+│   │   ├── train_models.py         # 1단계 로지스틱회귀 / 2·3단계 XGBoost(GridSearchCV) / 보조 MLP
+│   │   └── evaluate.py             # 평가지표, 임계값, FN비용 추정, SHAP/Feature Importance 교차검증
+│   ├── outputs/
+│   │   ├── versions/{timestamp}/   # 재학습할 때마다 새 폴더 (model.pkl, feature_transformer.pkl, metadata.json 등)
+│   │   ├── latest/                  # versions/ 중 가장 최근 버전의 복사본 — predict.py가 항상 여기만 봄
+│   │   └── run_history.csv          # 실행마다 한 줄씩 누적 (언제, 어떤 데이터로, 성능이 어땠는지)
+│   ├── train.py        # 재학습 묶음 — segment_discovery와 같은 주기 (가끔, 표본 충분히 쌓였을 때)
+│   └── predict.py      # 추론 — 학습 없음, 독립적으로 자유로운 주기 (언제든 즉시)
+│
+├── webapp/               # Streamlit 대시보드
+│   ├── app.py             # 진입점 (streamlit run webapp/app.py)
+│   ├── lib/
+│   │   ├── data.py         # segment_rules.json·outputs/latest·원본 CSV 로딩 공통 모듈
+│   │   └── theme.py        # 대시보드 공통 테마/스타일
+│   └── views/
+│       ├── overview.py     # 홈/개요 — KPI, 요인 TOP5, 확률분포, tenure 추이
+│       ├── priority.py     # 우선 대응 고객 — 예상 손실(월요금×이탈확률) 기준 재무지표 분해
+│       ├── analysis.py, analysis_a.py, analysis_b.py, subtrack_q.py  # 분석A/B/서브트랙Q 결과 시각화
+│       ├── roi.py          # 이탈 방어 비용 효과 분석 — 혜택 비용 대비 기대 매출 유지액 비교
+│       └── whatif.py       # 위험 고객 맞춤 프로모션 시뮬레이터 — 속성 변경 시 이탈확률 변화
+│
+├── shared/                # 두 패키지 공통 모듈
+│   ├── columns.py          # CATEGORICAL_COLS 등 컬럼 분류의 단일 출처
+│   ├── data_loader.py      # clean_raw_data: 자료형 정리+No-service 통합 공통 관문
+│   ├── stats_formulas.py   # Hanley-McNeil/Wilson 표준오차 — 순환 import 해소를 위해 분리된 공통 모듈
+│   └── logging_setup.py    # train.py 등의 실패 추적용 파일 로깅
+├── data/                  # 원본 데이터 (WA_FnUseC_TelcoCustomerChurn.csv), 신규고객은 new_customers.csv
+└── requirements.txt        # 검증된 최소 버전 명시
+```
+
+
+## 핵심 설계 원칙
+
+- **이원화의 진짜 경계선은 "재학습 vs 추론"이다 — "분석 vs 예측"이 아니다**
+  - **재학습 묶음(가끔, 표본이 충분히 쌓였을 때만 함께 실행)**: `segment_discovery`(세그먼트 경계·위험속성 발견)와 `churn_prediction/train.py`(모델 학습)는 같은 주기를 따른다. `train.py`가 쓰는 `segment_rules.json` 자체가 `segment_discovery`의 산출물이므로, 분석A/B/Q가 갱신될 때 모델도 같은 누적 데이터로 함께 재학습하는 게 일관적이다. 표본부족 위험(범주가 통째로 빠지는 등) 때문에 "신규 데이터만"으로 재학습하지 않고 항상 누적 전체 데이터로 학습한다.
+  - **추론(`churn_prediction/predict.py`, 자유 주기)**: 학습 과정이 전혀 없으므로(`outputs/latest/model.pkl`을 그대로 불러와 `predict_proba`만 호출) 데이터 양·시점과 무관하게 항상 안정적으로 동작한다. 정해진 주기 없이 필요할 때마다(매일, 즉석 조회, 특정 구간만 골라보기 등) 자유롭게 실행 가능 — "최신성을 반영한다"는 역할은 재학습이 아니라 이 추론 단계가 담당한다.
+- **재학습 결과는 덮어쓰지 않고 버전별로 보관한다**: `train.py`를 실행할 때마다 `outputs/versions/{실행시각}/`에 그 버전의 모델·변환규칙·평가결과·메타데이터(데이터 경로, 행 수, 성능)가 통째로 보관되고, 그중 최신 버전만 `outputs/latest/`로 복사된다. `predict.py`는 `outputs/latest/`만 보므로 항상 가장 최근 모델을 쓰며, 과거 버전이 필요하면 `outputs/versions/`에서 직접 꺼내 비교할 수 있다. `outputs/run_history.csv`에는 실행마다 한 줄씩(시각·데이터 경로·성능 요약) 누적되어 "언제 누가 재학습했는지" 추적 가능하다.
+- **인터페이스는 코드가 아니라 결과 파일**: `churn_prediction`은 `segment_discovery`의 내부 함수를 import하지 않고, `segment_rules.json`(경계, 위험속성, risk_count 계산식)만 읽는다. `predict.py`도 `train.py`의 코드를 다시 실행하지 않고, `train.py`가 저장해둔 결과(`outputs/latest/`)만 읽는다. Streamlit 대시보드(`webapp/`) 역시 `segment_rules.json`과 `outputs/latest/`를 읽기만 할 뿐, 다른 패키지의 내부 함수를 직접 호출하지 않는다.
+- **FeatureTransformer로 "학습 때 fit한 규칙"을 고정**: 더미컬럼 목록과 StandardScaler를 `train.py`가 fit해서 `feature_transformer.pkl`로 저장해두면, `predict.py`는 그 규칙을 그대로 재사용해 새 데이터를 변환한다. 추론 시 새로 fit하지 않으므로, 학습 때와 다른 인코딩이 생기는 일이 없다.
+- **"범위를 나눠 본다"는 건 날짜가 아니라 tenure(경과월) 기준이다**: 이 데이터는 절대 가입일/수집일이 없는 스냅샷 데이터다. 그래서 "2026년 5월 가입자만" 같은 절대 시점 필터링은 할 수 없고, "tenure 0\~5개월 구간만", "특정 segment만"처럼 경과월 기준으로만 범위를 나눌 수 있다.
+- **feature_cols_12 / feature_cols_3 분리**: "1단계는 세그먼트 라벨을 절대 포함하지 않는다"는 원칙이 코드에서 깨지지 않도록, 인코딩 직후 두 가지 피처 목록을 명시적으로 따로 구성한다.
+- **분석A·B 모두 ②③(또는 Ⓑ Ⓒ) 검증을 통과해야 확정**: 가지치기/결정나무로 패턴을 찾는 것과, 그 패턴이 우연이 아님을 순열검정·부트스트랩으로 검증하는 것은 완전히 별개 절차다. 부트스트랩은 Out-of-Bag(OOB) 방식으로 구현되어 있다. 반복횟수는 고정값이 아니라 순차적 조기 중단(Sequential Early Stopping)으로 데이터가 직접 정한다.
+- **멈춤 판단 로직은 한 곳에서 공통 관리**: 분석A·분석B·서브트랙Q 세 곳이 거의 동일한 부트스트랩 멈춤 판단 코드를 따로 구현하고 있던 것을 점검 중 발견 — `gap_calibration.run_sequential_bootstrap()`으로 공통화하였다.
+- **위험요인은 분석B 결과에서 자동 추출**: 서브트랙Q의 위험속성·위험값 매핑은 사람이 직접 적지 않고 `extract_risk_attribute_values()`가 분석B의 `top_attributes`에서 범주형 속성만 추출해 자동으로 결정한다.
+
+
+## 실행 순서
+
+> ⚠️ 분석A의 ②③(순열검정·부트스트랩)은 반복 계산이 있어 환경에 따라 시간이 걸릴 수 있습니다. 둘 다 순차적 조기 중단으로 자동화되어 있어(부트스트랩은 수십 회, 순열검정은 약 60회) 예전(고정 300회·200회)보다 체감 속도가 훨씬 빠릅니다.
+
+**VSCode에서 버튼으로 실행**: `app.py`, `train.py`, `predict.py` 모두 기본 경로가 코드에 들어가 있어, 명령줄 인자 없이 파일을 열고 우측 상단 ▶(Run Python File) 버튼만 눌러도 그대로 실행됩니다.
+
+**터미널에서 인자를 직접 지정하고 싶을 때**:
+
+```bash
+pip install -r requirements.txt
+
+# 1. 세그먼트/위험속성/risk_count 발견 (표본이 충분히 쌓였을 때)
+cd segment_discovery
+python app.py --data ../data/WA_FnUseC_TelcoCustomerChurn.csv
+
+# 2. 예측모델 재학습 (segment_rules.json 필요) — 실행마다 outputs/versions/{시각}/에 새로 쌓이고 outputs/latest/가 갱신됨
+cd ../churn_prediction
+python train.py --data ../data/WA_FnUseC_TelcoCustomerChurn.csv \
+                --rules ../segment_discovery/outputs/segment_rules.json
+
+# 3. 추론 (학습 없음, 언제든 원하는 만큼 자주 실행 가능) — outputs/latest/의 모델을 사용
+python predict.py --data ../data/new_customers.csv
+
+# 4. 대시보드
+streamlit run ../webapp/app.py
+```
+
+
+## 테스트 / 설정 / 자동화
+
+- **설정값은 `config.py` 한 곳에서 관리**: 랜덤시드, Train/Test 분할 비율, 순열검정·부트스트랩 반복횟수, XGBoost 하이퍼파라미터 등을 바꾸려면 이 파일만 고치면 된다.
+- **테스트 실행**: `pip install -r requirements.txt` 후 `pytest tests/ -v`.
+- **CI**: `.github/workflows/tests.yml`이 push/PR마다 GitHub Actions에서 자동으로 `pytest`를 돌린다.
+- **실패 추적**: `train.py` 실행 결과(성공/실패)는 `logs/train.log`에 타임스탬프와 함께 누적된다.
+
 
 ---
 
@@ -309,21 +429,21 @@ tenure, MonthlyCharges, TotalCharges는 모델 계열에 따라 두 가지 방�
 
 분석B는 분석A가 확정한 세그먼트 내에서 가지치기 결정나무로 주요 위험속성을 탐지하고, 그 속성들만으로 만든 모델의 AUC와 순열검정으로 적절성을 검증한다. 핵심 가치는 '같은 속성이라도 생애주기 맥락에 따라 영향력이 다르다'는 것의 실증이다.
 
-*위험속성의 개수 자체도 사람이 고정하지 않는다 — 결정나무의 feature_importances\_ 중 0보다 큰 속성을 전부 채택하며, 'top 2개만' 같은 고정 개수 제한을 두지 않는다. 세그먼트마다 1~2개로 자연스럽게 다르게 나오는 것은 이 자동 채택 방식의 결과다.*
+*위험속성의 개수 자체도 사람이 고정하지 않는다 — 결정나무의 feature_importances\_ 중 0보다 큰 속성을 전부 채택하며, 'top 2개만' 같은 고정 개수 제한을 두지 않는다. 세그먼트마다 1\~2개로 자연스럽게 다르게 나오는 것은 이 자동 채택 방식의 결과다.*
 
 |                   |                  |            |                                                 |                  |             |                    |
 |-------------------|------------------|------------|-------------------------------------------------|------------------|-------------|--------------------|
 | **세그먼트**      | **Train 표본수** | **이탈률** | **주요 위험속성**                               | **속성기반 AUC** | **p-value** | **95% 신뢰구간**   |
-| 0 (0~10.5개월)    | 1,369            | 49.67%     | MonthlyCharges, InternetService, OnlineSecurity | 0.7575           | 0.0000      | \[0.7223, 0.7811\] |
-| 1 (10.5~22.5개월) | 749              | 29.77%     | MonthlyCharges                                  | 0.7315           | 0.0000      | \[0.6850, 0.7743\] |
-| 2 (22.5~54.5개월) | 1,534            | 19.23%     | Contract, MonthlyCharges                        | 0.7903           | 0.0000      | \[0.7512, 0.8181\] |
+| 0 (0\~10.5개월)    | 1,369            | 49.67%     | MonthlyCharges, InternetService, OnlineSecurity | 0.7575           | 0.0000      | \[0.7223, 0.7811\] |
+| 1 (10.5\~22.5개월) | 749              | 29.77%     | MonthlyCharges                                  | 0.7315           | 0.0000      | \[0.6850, 0.7743\] |
+| 2 (22.5\~54.5개월) | 1,534            | 19.23%     | Contract, MonthlyCharges                        | 0.7903           | 0.0000      | \[0.7512, 0.8181\] |
 | 3 (54.5개월+)     | 1,278            | 8.61%      | Contract, MonthlyCharges                        | 0.7677           | 0.0000      | \[0.7115, 0.8040\] |
 
 *표 3-1. 세그먼트별 위험속성 탐지 결과 (반복횟수: 전 세그먼트 부트스트랩 40회, 순열검정 60회로 자동 수렴)*
 
 신규 고객(segment_0)은 서비스 구성(인터넷 서비스, 보안서비스 유무)이 핵심 위험신호인 반면, 중장기 고객(segment_2, segment_3)은 계약형태(Contract)가 핵심 위험신호로 전환된다. 이는 단일 모델의 SHAP 해석으로는 드러나지 않는 맥락별 실행 인사이트이다.
 
-*⚠️ 분석B는 세그먼트 내부에서 다시 5-fold 교차검증을 수행하므로 실제 학습/검증 표본이 분석A보다 더 적다(세그먼트당 250~500건 수준). 모든 세그먼트의 신뢰구간 폭이 0.04~0.06 수준으로 안정적임을 확인하여 표본부족 우려를 기각하였다.*
+*⚠️ 분석B는 세그먼트 내부에서 다시 5-fold 교차검증을 수행하므로 실제 학습/검증 표본이 분석A보다 더 적다(세그먼트당 250\~500건 수준). 모든 세그먼트의 신뢰구간 폭이 0.04\~0.06 수준으로 안정적임을 확인하여 표본부족 우려를 기각하였다.*
 
 4\. 서브트랙Q — risk_count 위험신호 누적 분석
 
@@ -461,8 +581,8 @@ XGBoost 하이퍼파라미터(max_depth, n_estimators, learning_rate)는 2단계
 | **검증 항목**                            | **관행적 고정값** | **자동화 결과 (데이터가 결정)** | **절감 비율** |
 | 분석A 부트스트랩 (전체데이터, n=4,930)   | 300회             | 40회                            | 7.5배         |
 | 분석A 순열검정 (전체데이터)              | 200회             | 60회                            | 3.3배         |
-| 분석B 부트스트랩 (세그먼트0~3, 4개 전부) | 300회             | 40회                            | 7.5배         |
-| 분석B 순열검정 (세그먼트0~3, 4개 전부)   | 200회             | 60회                            | 3.3배         |
+| 분석B 부트스트랩 (세그먼트0\~3, 4개 전부) | 300회             | 40회                            | 7.5배         |
+| 분석B 순열검정 (세그먼트0\~3, 4개 전부)   | 200회             | 60회                            | 3.3배         |
 | 서브트랙Q 부트스트랩                     | 300회             | 40회                            | 7.5배         |
 | 서브트랙Q 순열검정                       | 500회             | 60회                            | 8.3배         |
 
@@ -526,7 +646,7 @@ XGBoost 하이퍼파라미터(max_depth, n_estimators, learning_rate)는 2단계
 
 9\. 결론
 
-본 시스템은 시간(분석A)·속성(분석B)·결합신호(서브트랙Q)라는 세 축을 각각 데이터 기반으로 독립 검증하고, 그 검증 과정 자체(반복횟수, 안전 마진)뿐 아니라 예측모델의 하이퍼파라미터(max_depth, n_estimators, learning_rate)까지 자동화한 결과물이다. 예측모델(3단계 XGBoost)은 ROC-AUC 0.8457, F2-score 0.7048을 달성하였으며, 세그먼트 라벨의 직접적 성능 기여는 미미하지만 이는 분석A 자체의 통계적 검증(세그먼트단독 AUC 0.7223, p=0.0000)으로 별도 입증되는 가치와 구분되는 보조 지표임을 분명히 한다. 모든 수치는 segment_discovery/run.py와 churn_prediction/train.py의 단일 실행(실행 ID 20260622_171419)으로부터 재현 가능하다.
+본 시스템은 시간(분석A)·속성(분석B)·결합신호(서브트랙Q)라는 세 축을 각각 데이터 기반으로 독립 검증하고, 그 검증 과정 자체(반복횟수, 안전 마진)뿐 아니라 예측모델의 하이퍼파라미터(max_depth, n_estimators, learning_rate)까지 자동화한 결과물이다. 예측모델(3단계 XGBoost)은 ROC-AUC 0.8457, F2-score 0.7048을 달성하였으며, 세그먼트 라벨의 직접적 성능 기여는 미미하지만 이는 분석A 자체의 통계적 검증(세그먼트단독 AUC 0.7223, p=0.0000)으로 별도 입증되는 가치와 구분되는 보조 지표임을 분명히 한다. 모든 수치는 segment_discovery/app.py와 churn_prediction/train.py의 단일 실행(실행 ID 20260622_171419)으로부터 재현 가능하다.
 
 ---
 
@@ -592,7 +712,7 @@ ccp_alpha(가지치기 강도)는 GridSearchCV(①-가)만 탐색한다 — 랜�
 
 *그림 2-2. tenure별 이탈률 곡선과 발견된 경계 — 관행 기준(90일)과의 비교*
 
-발견된 경계(10.5/22.5/54.5개월)는 관행적 기준(90일≈3개월)과 전혀 다른 위치에서 나타난다. 세그먼트0(0~10.5개월)의 이탈률 49.7%는 전체 평균(26.5%) 대비 23.2%p 높은 가장 위험한 구간이다.
+발견된 경계(10.5/22.5/54.5개월)는 관행적 기준(90일≈3개월)과 전혀 다른 위치에서 나타난다. 세그먼트0(0\~10.5개월)의 이탈률 49.7%는 전체 평균(26.5%) 대비 23.2%p 높은 가장 위험한 구간이다.
 
 |                   |                                                  |
 |-------------------|--------------------------------------------------|
@@ -611,9 +731,9 @@ ccp_alpha(가지치기 강도)는 GridSearchCV(①-가)만 탐색한다 — 랜�
 |                   |            |                                                 |                  |
 |-------------------|------------|-------------------------------------------------|------------------|
 | **세그먼트**      | **이탈률** | **주요 위험속성**                               | **속성기반 AUC** |
-| 0 (0~10.5개월)    | 49.7%      | MonthlyCharges, InternetService, OnlineSecurity | 0.7575           |
-| 1 (10.5~22.5개월) | 29.8%      | MonthlyCharges                                  | 0.7315           |
-| 2 (22.5~54.5개월) | 19.2%      | Contract, MonthlyCharges                        | 0.7903           |
+| 0 (0\~10.5개월)    | 49.7%      | MonthlyCharges, InternetService, OnlineSecurity | 0.7575           |
+| 1 (10.5\~22.5개월) | 29.8%      | MonthlyCharges                                  | 0.7315           |
+| 2 (22.5\~54.5개월) | 19.2%      | Contract, MonthlyCharges                        | 0.7903           |
 | 3 (54.5개월+)     | 8.6%       | Contract, MonthlyCharges                        | 0.7677           |
 
 *표 3-1. 세그먼트별 위험속성 탐지 결과 (4개 세그먼트 모두 부트스트랩 40회·순열검정 60회로 자동 수렴)*
@@ -678,15 +798,15 @@ F2-score로 'FN이 더 비싸다'는 비즈니스 가정을 평가 단계에 반
 
 *그림 6-1. Sequential Early Stopping 멈춤 판단 루프*
 
-![그림 6-2. 검증 반복횟수 자동화 효과 — 고정값 대비 3.3~8.3배 절감](docs/diagrams/diagram_10_iteration_reduction.png)
+![그림 6-2. 검증 반복횟수 자동화 효과 — 고정값 대비 3.3-8.3배 절감](docs/diagrams/diagram_10_iteration_reduction.png)
 
-*그림 6-2. 검증 반복횟수 자동화 효과 — 고정값 대비 3.3~8.3배 절감*
+*그림 6-2. 검증 반복횟수 자동화 효과 — 고정값 대비 3.3-8.3배 절감*
 
 멈춤 판단은 두 조건의 결합이다: (1) Hanley-McNeil·Wilson 표준오차 공식으로 계산한 이론적 안전 상한보다 측정값이 좁아지는지, (2) 최근 5회 측정값이 5% 이내로 거의 변하지 않는지. 두 조건 중 하나가 연속 2회 충족되면 멈춘다. 딥러닝의 조기 종료(Early Stopping)가 경험적 판단(validation loss 정체)에 의존하는 반면, 본 시스템은 이론적 상한선을 먼저 계산해두고 실측 안정성과 함께 충족해야 멈추도록 설계하여 — 멈춤 판단 방식 자체를 통계적으로 검증 가능한 형태로 끌어올렸다.
 
 6.1 실측 재확인 — 공통 하한선 도달의 의미
 
-분석A·분석B(4개 세그먼트)·서브트랙Q 전부 부트스트랩 40회·순열검정 60회로 수렴하였다. 표본 크기가 749~4,930으로 6배 넘게 차이 나는데도 공통된 지점에서 멈추는 이유를 진단 데이터로 직접 확인하였다: 안전 상한 자체는 표본 크기·효과크기에 따라 실제로 다르게 계산되나(케이스별 0.045~0.138, 약 3배 차이), 이번 데이터의 모든 케이스가 AUC 0.72~0.79대의 비교적 강한 신호라 체크 가능한 최소 시점(30회)에 이미 그 느슨한 상한을 통과하였다. 비용 절감 효과(3.3~8.3배)는 명확하나, '작은 표본은 더 신중하게 반복한다'는 차별화 서사는 이번 실행에서는 재현되지 않았음을 정직하게 밝힌다.
+분석A·분석B(4개 세그먼트)·서브트랙Q 전부 부트스트랩 40회·순열검정 60회로 수렴하였다. 표본 크기가 749\~4,930으로 6배 넘게 차이 나는데도 공통된 지점에서 멈추는 이유를 진단 데이터로 직접 확인하였다: 안전 상한 자체는 표본 크기·효과크기에 따라 실제로 다르게 계산되나(케이스별 0.045\~0.138, 약 3배 차이), 이번 데이터의 모든 케이스가 AUC 0.72\~0.79대의 비교적 강한 신호라 체크 가능한 최소 시점(30회)에 이미 그 느슨한 상한을 통과하였다. 비용 절감 효과(3.3\~8.3배)는 명확하나, '작은 표본은 더 신중하게 반복한다'는 차별화 서사는 이번 실행에서는 재현되지 않았음을 정직하게 밝힌다.
 
 6.2 안전 마진(structural_gap)의 적응형 보정
 
@@ -735,116 +855,3 @@ F2-score로 'FN이 더 비싸다'는 비즈니스 가정을 평가 단계에 반
 
 - PELT 비교는 이론적 검토 단계에서 분포 가정 의존 한계를 확인하여 메인 채택 후보에서 제외, 코드 기반 실측 비교는 미수행
 
----
-
-## 폴더 구조
-
-```
-Customerang/  (저장소명: SKN32-2nd-4Team)
-├── config.py             # 전체 프로젝트 설정 단일 출처 (랜덤시드, 반복횟수, 하이퍼파라미터, 경로)
-├── .github/workflows/
-│   └── tests.yml          # push/PR마다 자동으로 tests/ 실행 (CI)
-├── docs/diagrams/         # 03. 모델 설계도 다이어그램 원본 (PNG)
-├── tests/                 # pytest — 회귀 테스트
-├── logs/                  # train.py 실행 기록 (성공/실패 모두, .gitignore 대상)
-│
-├── segment_discovery/   # 분석A·분석B·서브트랙Q (재학습 묶음 — train.py와 같은 주기로 가끔 실행)
-│   ├── src/
-│   │   ├── preprocessing.py    # 탐색용 전처리 (원본 로드~Train/Test 분할)
-│   │   ├── analysis_a.py       # ①-가 가지치기회귀나무 ①-나 RF보조검증 ②AUC+순열검정 ③부트스트랩CI
-│   │   ├── analysis_b.py       # Ⓐ패턴탐지 Ⓑ적절성검증(AUC+순열검정) Ⓒ부트스트랩CI + extract_risk_attribute_values
-│   │   ├── subtrack_q.py       # risk_count(메인) + K-means(보조탐색)
-│   │   └── gap_calibration.py  # Sequential Early Stopping 공통 루프 + structural_gap 적응형 보정
-│   ├── outputs/
-│   │   └── segment_rules.json  # ← churn_prediction이 읽는 유일한 인터페이스
-│   └── run.py                  # 진입점
-│
-├── churn_prediction/     # 예측모델
-│   ├── src/
-│   │   ├── feature_engineering.py  # segment_rules.json 적용, FeatureTransformer(저장/로드 가능)
-│   │   ├── train_models.py         # 1단계 로지스틱회귀 / 2·3단계 XGBoost(GridSearchCV) / 보조 MLP
-│   │   └── evaluate.py             # 평가지표, 임계값, FN비용 추정, SHAP/Feature Importance 교차검증
-│   ├── outputs/
-│   │   ├── versions/{timestamp}/   # 재학습할 때마다 새 폴더 (model.pkl, feature_transformer.pkl, metadata.json 등)
-│   │   ├── latest/                  # versions/ 중 가장 최근 버전의 복사본 — predict.py가 항상 여기만 봄
-│   │   └── run_history.csv          # 실행마다 한 줄씩 누적 (언제, 어떤 데이터로, 성능이 어땠는지)
-│   ├── train.py        # 재학습 묶음 — segment_discovery와 같은 주기 (가끔, 표본 충분히 쌓였을 때)
-│   └── predict.py      # 추론 — 학습 없음, 독립적으로 자유로운 주기 (언제든 즉시)
-│
-├── webapp/               # Streamlit 대시보드
-│   ├── app.py             # 진입점 (streamlit run webapp/app.py)
-│   ├── lib/
-│   │   ├── data.py         # segment_rules.json·outputs/latest·원본 CSV 로딩 공통 모듈
-│   │   └── theme.py        # 대시보드 공통 테마/스타일
-│   └── views/
-│       ├── overview.py     # 홈/개요 — KPI, 요인 TOP5, 확률분포, tenure 추이
-│       ├── priority.py     # 우선 대응 고객 — 예상 손실(월요금×이탈확률) 기준 재무지표 분해
-│       ├── analysis.py, analysis_a.py, analysis_b.py, subtrack_q.py  # 분석A/B/서브트랙Q 결과 시각화
-│       ├── roi.py          # 이탈 방어 비용 효과 분석 — 혜택 비용 대비 기대 매출 유지액 비교
-│       └── whatif.py       # 위험 고객 맞춤 프로모션 시뮬레이터 — 속성 변경 시 이탈확률 변화
-│
-├── shared/                # 두 패키지 공통 모듈
-│   ├── columns.py          # CATEGORICAL_COLS 등 컬럼 분류의 단일 출처
-│   ├── data_loader.py      # clean_raw_data: 자료형 정리+No-service 통합 공통 관문
-│   ├── stats_formulas.py   # Hanley-McNeil/Wilson 표준오차 — 순환 import 해소를 위해 분리된 공통 모듈
-│   └── logging_setup.py    # train.py 등의 실패 추적용 파일 로깅
-├── data/                  # 원본 데이터 (WA_FnUseC_TelcoCustomerChurn.csv), 신규고객은 new_customers.csv
-└── requirements.txt        # 검증된 최소 버전 명시
-```
-
-## 핵심 설계 원칙
-
-- **이원화의 진짜 경계선은 "재학습 vs 추론"이다 — "분석 vs 예측"이 아니다**
-  - **재학습 묶음(가끔, 표본이 충분히 쌓였을 때만 함께 실행)**: `segment_discovery`(세그먼트 경계·위험속성 발견)와 `churn_prediction/train.py`(모델 학습)는 같은 주기를 따른다. `train.py`가 쓰는 `segment_rules.json` 자체가 `segment_discovery`의 산출물이므로, 분석A/B/Q가 갱신될 때 모델도 같은 누적 데이터로 함께 재학습하는 게 일관적이다. 표본부족 위험(범주가 통째로 빠지는 등) 때문에 "신규 데이터만"으로 재학습하지 않고 항상 누적 전체 데이터로 학습한다.
-  - **추론(`churn_prediction/predict.py`, 자유 주기)**: 학습 과정이 전혀 없으므로(`outputs/latest/model.pkl`을 그대로 불러와 `predict_proba`만 호출) 데이터 양·시점과 무관하게 항상 안정적으로 동작한다. 정해진 주기 없이 필요할 때마다(매일, 즉석 조회, 특정 구간만 골라보기 등) 자유롭게 실행 가능 — "최신성을 반영한다"는 역할은 재학습이 아니라 이 추론 단계가 담당한다.
-- **재학습 결과는 덮어쓰지 않고 버전별로 보관한다**: `train.py`를 실행할 때마다 `outputs/versions/{실행시각}/`에 그 버전의 모델·변환규칙·평가결과·메타데이터(데이터 경로, 행 수, 성능)가 통째로 보관되고, 그중 최신 버전만 `outputs/latest/`로 복사된다. `predict.py`는 `outputs/latest/`만 보므로 항상 가장 최근 모델을 쓰며, 과거 버전이 필요하면 `outputs/versions/`에서 직접 꺼내 비교할 수 있다. `outputs/run_history.csv`에는 실행마다 한 줄씩(시각·데이터 경로·성능 요약) 누적되어 "언제 누가 재학습했는지" 추적 가능하다.
-- **인터페이스는 코드가 아니라 결과 파일**: `churn_prediction`은 `segment_discovery`의 내부 함수를 import하지 않고, `segment_rules.json`(경계, 위험속성, risk_count 계산식)만 읽는다. `predict.py`도 `train.py`의 코드를 다시 실행하지 않고, `train.py`가 저장해둔 결과(`outputs/latest/`)만 읽는다. Streamlit 대시보드(`webapp/`) 역시 `segment_rules.json`과 `outputs/latest/`를 읽기만 할 뿐, 다른 패키지의 내부 함수를 직접 호출하지 않는다.
-- **FeatureTransformer로 "학습 때 fit한 규칙"을 고정**: 더미컬럼 목록과 StandardScaler를 `train.py`가 fit해서 `feature_transformer.pkl`로 저장해두면, `predict.py`는 그 규칙을 그대로 재사용해 새 데이터를 변환한다. 추론 시 새로 fit하지 않으므로, 학습 때와 다른 인코딩이 생기는 일이 없다.
-- **"범위를 나눠 본다"는 건 날짜가 아니라 tenure(경과월) 기준이다**: 이 데이터는 절대 가입일/수집일이 없는 스냅샷 데이터다. 그래서 "2026년 5월 가입자만" 같은 절대 시점 필터링은 할 수 없고, "tenure 0~5개월 구간만", "특정 segment만"처럼 경과월 기준으로만 범위를 나눌 수 있다.
-- **feature_cols_12 / feature_cols_3 분리**: "1단계는 세그먼트 라벨을 절대 포함하지 않는다"는 원칙이 코드에서 깨지지 않도록, 인코딩 직후 두 가지 피처 목록을 명시적으로 따로 구성한다.
-- **분석A·B 모두 ②③(또는 Ⓑ Ⓒ) 검증을 통과해야 확정**: 가지치기/결정나무로 패턴을 찾는 것과, 그 패턴이 우연이 아님을 순열검정·부트스트랩으로 검증하는 것은 완전히 별개 절차다. 부트스트랩은 Out-of-Bag(OOB) 방식으로 구현되어 있다. 반복횟수는 고정값이 아니라 순차적 조기 중단(Sequential Early Stopping)으로 데이터가 직접 정한다.
-- **멈춤 판단 로직은 한 곳에서 공통 관리**: 분석A·분석B·서브트랙Q 세 곳이 거의 동일한 부트스트랩 멈춤 판단 코드를 따로 구현하고 있던 것을 점검 중 발견 — `gap_calibration.run_sequential_bootstrap()`으로 공통화하였다.
-- **위험요인은 분석B 결과에서 자동 추출**: 서브트랙Q의 위험속성·위험값 매핑은 사람이 직접 적지 않고 `extract_risk_attribute_values()`가 분석B의 `top_attributes`에서 범주형 속성만 추출해 자동으로 결정한다.
-
-## 실행 순서
-
-> ⚠️ 분석A의 ②③(순열검정·부트스트랩)은 반복 계산이 있어 환경에 따라 시간이 걸릴 수 있습니다. 둘 다 순차적 조기 중단으로 자동화되어 있어(부트스트랩은 수십 회, 순열검정은 약 60회) 예전(고정 300회·200회)보다 체감 속도가 훨씬 빠릅니다.
-
-**VSCode에서 버튼으로 실행**: `app.py`, `train.py`, `predict.py` 모두 기본 경로가 코드에 들어가 있어, 명령줄 인자 없이 파일을 열고 우측 상단 ▶(Run Python File) 버튼만 눌러도 그대로 실행됩니다.
-
-**터미널에서 인자를 직접 지정하고 싶을 때**:
-
-```bash
-pip install -r requirements.txt
-
-# 1. 세그먼트/위험속성/risk_count 발견 (표본이 충분히 쌓였을 때)
-cd segment_discovery
-python run.py --data ../data/WA_FnUseC_TelcoCustomerChurn.csv
-
-# 2. 예측모델 재학습 (segment_rules.json 필요) — 실행마다 outputs/versions/{시각}/에 새로 쌓이고 outputs/latest/가 갱신됨
-cd ../churn_prediction
-python train.py --data ../data/WA_FnUseC_TelcoCustomerChurn.csv \
-                --rules ../segment_discovery/outputs/segment_rules.json
-
-# 3. 추론 (학습 없음, 언제든 원하는 만큼 자주 실행 가능) — outputs/latest/의 모델을 사용
-python predict.py --data ../data/new_customers.csv
-
-# 4. 대시보드
-streamlit run ../webapp/app.py
-```
-
-## 테스트 / 설정 / 자동화
-
-- **설정값은 `config.py` 한 곳에서 관리**: 랜덤시드, Train/Test 분할 비율, 순열검정·부트스트랩 반복횟수, XGBoost 하이퍼파라미터 등을 바꾸려면 이 파일만 고치면 된다.
-- **테스트 실행**: `pip install -r requirements.txt` 후 `pytest tests/ -v`.
-- **CI**: `.github/workflows/tests.yml`이 push/PR마다 GitHub Actions에서 자동으로 `pytest`를 돌린다.
-- **실패 추적**: `train.py` 실행 결과(성공/실패)는 `logs/train.log`에 타임스탬프와 함께 누적된다.
-
-## 팀 소개 및 역할 분담
-
-**Customerang**
-
-| 구성원 | 역할 |
-|---|---|
-| 오한빈 (팀장) | 핵심 아이디어 제안(생애주기 세그멘테이션의 데이터 기반 자동화 루프화), 분석A·분석B·서브트랙Q·예측모델 전체 기획·설계·파이프라인 구축 및 검증 구현, 전처리 구현, 프로젝트 전 과정 참여 |
-| 서유현, 소성민, 임정택 | 팀장이 설계한 분석A·분석B·서브트랙Q·예측모델 전 영역에 걸쳐 공동으로 실데이터 검증 수행, Streamlit 대시보드 구현 |

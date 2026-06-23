@@ -4,7 +4,7 @@ churn_prediction/predict.py
 저장된 model.pkl + feature_transformer.pkl 을 불러와 새 고객 데이터에
 이탈확률만 매긴다. 학습은 전혀 일어나지 않으므로 매우 빠르다.
 
-⚠️ 이 스크립트에는 "주기"가 없다 - train.py(재학습)는 segment_discovery/run.py
+⚠️ 이 스크립트에는 "주기"가 없다 - train.py(재학습)는 segment_discovery/app.py
 (분석A/B/Q)와 같은 묶음으로, 충분한 표본이 쌓여야 의미가 있어 가끔 함께
 실행하지만, 추론은 그런 제약이 없으므로 필요할 때마다(매일, 매주, 즉석
 조회 등) 독립적으로 자유롭게 실행할 수 있다. "최신 데이터 반영"이라는
